@@ -1,0 +1,18 @@
+mode: "paper"        # "paper" or "live"
+symbol: "AAPL"
+interval: "15m"
+history_days: 365
+model_path: "models/rf_model.pkl"
+features:
+  - "close"
+  - "volume"
+risk:
+  max_risk_per_trade_pct: 1.0
+  daily_max_loss_pct: 3.0
+zerodha:
+  api_key: "YOUR_KITE_API_KEY"
+  api_secret: "YOUR_KITE_API_SECRET"
+  access_token: "YOUR_ACCESS_TOKEN"   # keep secrets outside git!
+server:
+  host: "0.0.0.0"
+  port: 5000
