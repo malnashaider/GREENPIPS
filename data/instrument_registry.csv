@@ -1,0 +1,11 @@
+# instrument_registry.csv
+# columns: universe_symbol, provider_hint, asset_class, note
+NSE:RELIANCE, yfinance, equity, "Reliance Industries (NSE)"
+NSE:TCS, yfinance, equity, "TCS (NSE)"
+BSE:TCS, yfinance, equity, "TCS (BSE)"
+INDEX:NIFTY, yfinance, index, "Nifty 50 index"
+BINANCE:BTC/USDT, ccxt, crypto, "Bitcoin spot on Binance"
+BINANCE:DOGE/USDT, ccxt, crypto, "Dogecoin"
+FX:EURUSD, yfinance, fx, "EURUSD FX pair"
+METAL:GOLD, yfinance, metal, "Gold futures / proxy"
+NSE:NIFTY, kite, option_chain, "Nifty option chain (use kite)"
