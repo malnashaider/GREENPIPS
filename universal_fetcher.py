@@ -141,3 +141,107 @@ if __name__ == "__main__":
             time.sleep(1)
         except Exception as e:
             print("Error:", e)
+# scripts/universal_fetcher.py
+"""
+Universal data fetcher + candlestick pattern integration.
+- yfinance for global equities/indices/metals/FX
+- ccxt for crypto
+- integrates candlestick_patterns.detect_patterns() to return final_signal
+"""
+
+import pandas as pd
+import logging
+import time
+from typing import Optional
+import yfinance as yf
+import ccxt
+
+from candlestick_patterns import detect_patterns  # ensure candlestick_patterns.py is in PYTHONPATH or same dir
+
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+def fetch_yfinance_ohlcv(symbol: str, interval: str = "15m", period: str = "30d") -> pd.DataFrame:
+    df = yf.download(tickers=symbol, period=period, interval=interval, progress=False)
+    if df is None or df.empty:
+        logger.warning("No data from yfinance for %s", symbol)
+        return pd.DataFrame()
+    df = df.rename(columns={"Open":"open","High":"high","Low":"low","Close":"close","Volume":"volume"})
+    df.index = pd.to_datetime(df.index)
+    df = df[["open","high","low","close","volume"]]
+    return df
+
+_ccxt_exchanges = {}
+def get_ccxt_exchange(name="binance"):
+    if name not in _ccxt_exchanges:
+        _ccxt_exchanges[name] = getattr(ccxt, name)()
+    return _ccxt_exchanges[name]
+
+def fetch_crypto_ohlcv(symbol: str, exchange_name: str = "binance", timeframe: str = "15m", limit: int = 500):
+    ex = get_ccxt_exchange(exchange_name)
+    try:
+        ohlcv = ex.fetch_ohlcv(symbol, timeframe=timeframe, limit=limit)
+    except Exception as e:
+        logger.error("CCXT fetch failed for %s: %s", symbol, e)
+        return pd.DataFrame()
+    df = pd.DataFrame(ohlcv, columns=["timestamp","open","high","low","close","volume"])
+    df["timestamp"] = pd.to_datetime(df["timestamp"], unit="ms")
+    df.set_index("timestamp", inplace=True)
+    return df
+
+def fetch_market_data(univ_symbol: str, interval: str = "15m", period: str = "30d", exchange_hint: Optional[str]=None):
+    """
+    Universal interface returning OHLCV with candlestick signals attached.
+    """
+    df = pd.DataFrame()
+    try:
+        if univ_symbol.startswith("NSE:") or univ_symbol.endswith(".NS"):
+            if univ_symbol.startswith("NSE:"):
+                yf_sym = univ_symbol.split(":",1)[1] + ".NS"
+            else:
+                yf_sym = univ_symbol
+            df = fetch_yfinance_ohlcv(yf_sym, interval=interval, period=period)
+        elif univ_symbol.startswith("BSE:"):
+            yf_sym = univ_symbol.split(":",1)[1] + ".BO"
+            df = fetch_yfinance_ohlcv(yf_sym, interval=interval, period=period)
+        elif univ_symbol.startswith("INDEX:"):
+            idx = univ_symbol.split(":",1)[1].upper()
+            mapping = {"NIFTY":"^NSEI","SENSEX":"^BSESN","DOW":"^DJI","SPX":"^GSPC"}
+            yf_sym = mapping.get(idx, idx)
+            df = fetch_yfinance_ohlcv(yf_sym, interval=interval, period=period)
+        elif univ_symbol.startswith("BINANCE:") or univ_symbol.startswith("CRYPTO:"):
+            sym = univ_symbol.split(":",1)[1]
+            df = fetch_crypto_ohlcv(sym, exchange_name=(exchange_hint or "binance"), timeframe=interval)
+        elif univ_symbol.startswith("FX:"):
+            pair = univ_symbol.split(":",1)[1].upper()
+            yf_sym = f"{pair}=X"
+            df = fetch_yfinance_ohlcv(yf_sym, interval=interval, period=period)
+        elif univ_symbol.startswith("METAL:"):
+            metal = univ_symbol.split(":",1)[1].upper()
+            mapping = {"GOLD":"GC=F","SILVER":"SI=F"}
+            yf_sym = mapping.get(metal, metal)
+            df = fetch_yfinance_ohlcv(yf_sym, interval=interval, period=period)
+        else:
+            df = fetch_yfinance_ohlcv(univ_symbol, interval=interval, period=period)
+    except Exception as e:
+        logger.exception("fetch_market_data error for %s: %s", univ_symbol, e)
+        return pd.DataFrame()
+
+    if df.empty:
+        return df
+
+    # Add candlestick pattern detection
+    try:
+        df_patterns = detect_patterns(df[["open","high","low","close","volume"]])
+        # merge pattern columns into df (pattern function returns a DataFrame with pattern columns)
+        for col in df_patterns.columns:
+            if col not in df.columns:
+                df[col] = df_patterns[col]
+            else:
+                # avoid overwriting core columns
+                if col not in ["open","high","low","close","volume"]:
+                    df[col] = df_patterns[col]
+    except Exception as e:
+        logger.exception("Pattern detection failed for %s: %s", univ_symbol, e)
+
+    return df
